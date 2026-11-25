@@ -1,0 +1,33 @@
+
+name: Build rgitui for Mac Intel
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build macOS x86_64
+    runs-on: macos-15-intel
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+          targets: x86_64-apple-darwin
+
+      - name: Build rgitui
+        run: cargo build --release --target x86_64-apple-darwin
+
+      - name: Verify architecture
+        run: file target/x86_64-apple-darwin/release/rgitui
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: rgitui-macos-intel
+          path: target/x86_64-apple-darwin/release/rgitui
+          if-no-files-found: error
