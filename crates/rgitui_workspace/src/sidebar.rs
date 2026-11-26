@@ -37,6 +37,32 @@ pub enum SidebarEvent {
     BranchDelete(String),
     BranchRename(String),
     BranchCopyName(String),
+    /// Open the create-branch dialog based on the named branch.
+    BranchCreateFrom(String),
+    /// Open the create-tag dialog at the tip of the named branch.
+    BranchTag(String),
+    /// Push the named branch to the branch it tracks.
+    BranchPush(String),
+    /// Fast-forward the named branch to its upstream.
+    BranchFastForward(String),
+    /// Fetch the named branch's upstream and fast-forward the branch to it.
+    BranchFetchInto(String),
+    /// Rebase the checked-out branch onto the named branch.
+    BranchRebase(String),
+    /// Interactively rebase the checked-out branch onto the named branch.
+    BranchInteractiveRebase(String),
+    /// Compare the named branch with HEAD.
+    BranchCompareHead(String),
+    /// Compare the named branch with its upstream.
+    BranchCompareUpstream(String),
+    /// Compare the named branch with a ref chosen in a dialog.
+    BranchCompareWith(String),
+    /// Edit the named branch's description.
+    BranchEditDescription(String),
+    /// Choose the remote branch the named branch tracks.
+    BranchSetTracking(String),
+    /// Write the named branch to an archive file.
+    BranchArchive(String),
     MergeBranch(String),
     RemoteFetch(String),
     RemotePull(String),
@@ -139,6 +165,21 @@ struct StashContextMenuState {
     position: Point<Pixels>,
 }
 
+/// State for the right-click local-branch context menu.
+struct BranchContextMenuState {
+    /// Name of the branch that was right-clicked.
+    name: String,
+    /// Whether that branch is the checked-out one.
+    is_head: bool,
+    /// The remote branch it tracks, e.g. `origin/main`.
+    upstream: Option<String>,
+    /// Commits the upstream has that this branch does not.
+    behind: usize,
+    /// Window-relative position where the menu should appear.
+    position: Point<Pixels>,
+}
+/// Minimum width of the local-branch context menu, in pixels.
+const BRANCH_MENU_WIDTH: f32 = 340.0;
 /// Minimum width of the stash context menu, in pixels.
 const STASH_MENU_WIDTH: f32 = 180.0;
 /// Height of a single stash context-menu item row, in pixels.
@@ -417,6 +458,7 @@ pub struct Sidebar {
     current_user_email: Option<String>,
     /// Right-click context menu for stashes.
     stash_context_menu: Option<StashContextMenuState>,
+    branch_context_menu: Option<BranchContextMenuState>,
     /// Cached bounds of the sidebar panel container (updated via on_allocate).
     container_bounds: Bounds<Pixels>,
     local_branches_scroll: UniformListScrollHandle,
@@ -583,6 +625,7 @@ impl Sidebar {
             my_branches_active: false,
             current_user_email: None,
             stash_context_menu: None,
+            branch_context_menu: None,
             container_bounds: Bounds::new(Point::new(px(0.), px(0.)), Size::new(px(0.), px(0.))),
             local_branches_scroll: UniformListScrollHandle::new(),
             remotes_scroll: UniformListScrollHandle::new(),
@@ -602,6 +645,7 @@ impl Sidebar {
         position: Point<Pixels>,
         cx: &mut Context<Self>,
     ) {
+        self.branch_context_menu = None;
         self.stash_context_menu = Some(StashContextMenuState {
             stash_index,
             position,
@@ -609,6 +653,33 @@ impl Sidebar {
         cx.notify();
     }
 
+    /// Show the local-branch context menu at the given window-relative position.
+    fn show_branch_context_menu(
+        &mut self,
+        name: String,
+        is_head: bool,
+        upstream: Option<String>,
+        behind: usize,
+        position: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        self.stash_context_menu = None;
+        self.branch_context_menu = Some(BranchContextMenuState {
+            name,
+            is_head,
+            upstream,
+            behind,
+            position,
+        });
+        cx.notify();
+    }
+    /// Dismiss the local-branch context menu if it's open.
+    fn dismiss_branch_context_menu(&mut self, cx: &mut Context<Self>) {
+        if self.branch_context_menu.is_some() {
+            self.branch_context_menu = None;
+            cx.notify();
+        }
+    }
     /// Dismiss the stash context menu if it's open.
     fn dismiss_stash_context_menu(&mut self, cx: &mut Context<Self>) {
         if self.stash_context_menu.is_some() {
@@ -2242,6 +2313,24 @@ impl Render for Sidebar {
                             .hover(|s| s.bg(colors.ghost_element_hover))
                             .active(|s| s.bg(colors.ghost_element_active))
                             .cursor_pointer()
+                            .on_mouse_down(MouseButton::Right, {
+                                let w_menu = w.clone();
+                                let name_menu = name.to_string();
+                                let upstream_menu = branch.upstream.clone();
+                                let behind_menu = branch.behind_count();
+                                move |event: &MouseDownEvent, _: &mut Window, cx: &mut App| {
+                                    let _ = w_menu.update(cx, |this: &mut Sidebar, cx| {
+                                        this.show_branch_context_menu(
+                                            name_menu.clone(),
+                                            is_head,
+                                            upstream_menu.clone(),
+                                            behind_menu,
+                                            event.position,
+                                            cx,
+                                        );
+                                    });
+                                }
+                            })
                             .on_click(move |event: &ClickEvent, _: &mut Window, cx: &mut App| {
                                 if event.click_count() >= 2 {
                                     let _ = w_click.clone().update(cx, |_this, cx| {
@@ -4429,6 +4518,206 @@ impl Render for Sidebar {
 
         let mut panel = panel.child(scroll_div);
 
+        if let Some(ref menu_state) = self.branch_context_menu {
+            let pos = menu_state.position;
+            let weak = cx.weak_entity();
+            let name = menu_state.name.clone();
+            let is_head = menu_state.is_head;
+            let head_name: SharedString = self
+                .local_branches
+                .iter()
+                .find(|b| b.is_head)
+                .map(|b| b.name.clone())
+                .unwrap_or_else(|| "HEAD".to_string())
+                .into();
+            let upstream = menu_state.upstream.clone();
+            let has_upstream = upstream.is_some();
+            let upstream_label: SharedString = upstream.clone().unwrap_or_default().into();
+            let can_fast_forward = has_upstream && menu_state.behind > 0;
+            let branch_label: SharedString = name.clone().into();
+            // (event for each row, label, disabled). `None` is a separator.
+            type Row = Option<(SidebarEvent, SharedString, bool)>;
+            let rows: Vec<Row> = vec![
+                Some((
+                    SidebarEvent::BranchCheckout(name.clone()),
+                    t!(
+                        "sidebar.branch_menu.checkout",
+                        branch = branch_label.clone()
+                    ),
+                    is_head,
+                )),
+                None,
+                Some((
+                    SidebarEvent::BranchFastForward(name.clone()),
+                    t!(
+                        "sidebar.branch_menu.fast_forward",
+                        upstream = upstream_label.clone()
+                    ),
+                    !can_fast_forward,
+                )),
+                None,
+                Some((
+                    SidebarEvent::BranchFetchInto(name.clone()),
+                    t!(
+                        "sidebar.branch_menu.fetch_into",
+                        upstream = upstream_label.clone(),
+                        branch = branch_label.clone()
+                    ),
+                    !has_upstream,
+                )),
+                Some((
+                    SidebarEvent::BranchPush(name.clone()),
+                    t!("sidebar.branch_menu.push", branch = branch_label.clone()),
+                    false,
+                )),
+                Some((
+                    SidebarEvent::MergeBranch(name.clone()),
+                    t!(
+                        "sidebar.branch_menu.merge",
+                        branch = branch_label.clone(),
+                        head = head_name.clone()
+                    ),
+                    is_head,
+                )),
+                Some((
+                    SidebarEvent::BranchRebase(name.clone()),
+                    t!(
+                        "sidebar.branch_menu.rebase",
+                        head = head_name.clone(),
+                        branch = branch_label.clone()
+                    ),
+                    is_head,
+                )),
+                None,
+                Some((
+                    SidebarEvent::BranchInteractiveRebase(name.clone()),
+                    t!(
+                        "sidebar.branch_menu.interactive_rebase",
+                        head = head_name.clone(),
+                        branch = branch_label.clone()
+                    ),
+                    is_head,
+                )),
+                None,
+                Some((
+                    SidebarEvent::BranchCompareHead(name.clone()),
+                    t!("sidebar.branch_menu.compare_head"),
+                    is_head,
+                )),
+                Some((
+                    SidebarEvent::BranchCompareUpstream(name.clone()),
+                    t!(
+                        "sidebar.branch_menu.compare_upstream",
+                        upstream = upstream_label.clone()
+                    ),
+                    !has_upstream,
+                )),
+                Some((
+                    SidebarEvent::BranchCompareWith(name.clone()),
+                    t!("sidebar.branch_menu.compare_with"),
+                    false,
+                )),
+                None,
+                Some((
+                    SidebarEvent::BranchEditDescription(name.clone()),
+                    t!(
+                        "sidebar.branch_menu.edit_description",
+                        branch = branch_label.clone()
+                    ),
+                    false,
+                )),
+                Some((
+                    SidebarEvent::BranchRename(name.clone()),
+                    t!("sidebar.branch_menu.rename", branch = branch_label.clone()),
+                    false,
+                )),
+                Some((
+                    SidebarEvent::BranchDelete(name.clone()),
+                    t!("sidebar.branch_menu.delete", branch = branch_label.clone()),
+                    is_head,
+                )),
+                None,
+                Some((
+                    SidebarEvent::BranchCreateFrom(name.clone()),
+                    t!("sidebar.branch_menu.create_branch"),
+                    false,
+                )),
+                Some((
+                    SidebarEvent::BranchTag(name.clone()),
+                    t!("sidebar.branch_menu.create_tag"),
+                    false,
+                )),
+                None,
+                Some((
+                    SidebarEvent::BranchSetTracking(name.clone()),
+                    t!("sidebar.branch_menu.set_tracking"),
+                    false,
+                )),
+                Some((
+                    SidebarEvent::BranchArchive(name.clone()),
+                    t!("sidebar.branch_menu.archive"),
+                    false,
+                )),
+                None,
+                Some((
+                    SidebarEvent::BranchCopyName(name.clone()),
+                    t!("sidebar.branch_menu.copy_name"),
+                    false,
+                )),
+            ];
+            let mut ctx = rgitui_ui::ContextMenu::new().min_width(BRANCH_MENU_WIDTH);
+            for row in rows {
+                match row {
+                    None => ctx = ctx.separator(),
+                    Some((event, label, disabled)) => {
+                        let w = weak.clone();
+                        ctx = ctx.item(
+                            rgitui_ui::ContextMenuItem::new(label)
+                                .disabled(disabled)
+                                .on_click(move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
+                                    let event = event.clone();
+                                    w.update(cx, |this: &mut Sidebar, cx| {
+                                        this.branch_context_menu = None;
+                                        cx.notify();
+                                        cx.emit(event);
+                                    })
+                                    .ok();
+                                }),
+                        );
+                    }
+                }
+            }
+            // Deferred and anchored to the click so the menu paints above the
+            // whole window and is not clipped by the sidebar, while still being
+            // kept on screen.
+            panel = panel.child(deferred(
+                anchored()
+                    .position(pos)
+                    .anchor(Anchor::TopLeft)
+                    .snap_to_window_with_margin(px(8.))
+                    .child(
+                        div()
+                            .id("branch-context-menu")
+                            .occlude()
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                |_: &MouseDownEvent, _: &mut Window, cx: &mut App| {
+                                    cx.stop_propagation();
+                                },
+                            )
+                            .on_mouse_down(
+                                MouseButton::Right,
+                                |_: &MouseDownEvent, _: &mut Window, cx: &mut App| {
+                                    cx.stop_propagation();
+                                },
+                            )
+                            .on_mouse_down_out(cx.listener(|this, _: &MouseDownEvent, _, cx| {
+                                this.dismiss_branch_context_menu(cx);
+                            }))
+                            .child(ctx),
+                    ),
+            ));
+        }
         if let Some(ref menu_state) = self.stash_context_menu {
             let menu_bg = colors.elevated_surface_background;
             let menu_border = colors.border;

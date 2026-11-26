@@ -77,6 +77,8 @@ pub struct InteractiveRebase {
     visible: bool,
     entries: Vec<RebaseEntry>,
     target_ref: String,
+    /// Branch the plan is replayed onto, when the rebase moves to another base.
+    onto: Option<String>,
     selected_index: usize,
     /// Index of the entry whose reword message is being edited, if any.
     ///
@@ -124,6 +126,7 @@ impl InteractiveRebase {
             pending_focus: false,
             entries: Vec::new(),
             target_ref: String::new(),
+            onto: None,
             selected_index: 0,
             editing_reword: None,
             reword_editor: cx.new(|cx| {
@@ -151,6 +154,7 @@ impl InteractiveRebase {
     ) {
         self.entries = entries;
         self.target_ref = target_ref.into();
+        self.onto = None;
         self.selected_index = 0;
         self.editing_reword = None;
         self.dragging_index = None;
@@ -170,6 +174,7 @@ impl InteractiveRebase {
     ) {
         self.entries = entries;
         self.target_ref = target_ref.into();
+        self.onto = None;
         self.selected_index = 0;
         self.editing_reword = None;
         self.dragging_index = None;
@@ -181,6 +186,15 @@ impl InteractiveRebase {
 
     pub fn is_visible(&self) -> bool {
         self.visible
+    }
+    /// Replay the plan onto `onto` (a branch name) instead of its own base.
+    /// Call after `show`/`show_visible`, which clear it.
+    pub fn set_onto(&mut self, onto: Option<String>) {
+        self.onto = onto;
+    }
+    /// The branch the plan is replayed onto, if any.
+    pub fn onto(&self) -> Option<&str> {
+        self.onto.as_deref()
     }
 
     pub fn dismiss(&mut self, cx: &mut Context<Self>) {

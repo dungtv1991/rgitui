@@ -2,9 +2,10 @@ use gpui::{Bounds, Entity, EntityId, Pixels, WeakEntity, WeakFocusHandle};
 use rgitui_git::GitOperationUpdate;
 
 use crate::{
-    BranchDialog, CommandPalette, CommitPanel, ConfirmDialog, CreatePrDialog, InteractiveRebase,
-    RenameDialog, RepoCloneDialog, RepoOpener, ShortcutsHelp, StashBranchDialog, StashSaveDialog,
-    TagDialog, ThemeEditorDialog, WorktreeDialog,
+    BranchDialog, BranchPromptDialog, CommandPalette, CommitPanel, ConfirmDialog, CreatePrDialog,
+    InteractiveRebase, LocalChangesDialog, RenameDialog, RepoCloneDialog, RepoOpener,
+    ShortcutsHelp, StashBranchDialog, StashSaveDialog, TagDialog, ThemeEditorDialog,
+    WorktreeDialog,
 };
 
 use super::focus::{DrawnPanels, OverlayFocus};
@@ -29,6 +30,8 @@ pub(crate) struct DialogState {
     pub branch_dialog: Entity<BranchDialog>,
     pub tag_dialog: Entity<TagDialog>,
     pub rename_dialog: Entity<RenameDialog>,
+    pub branch_prompt_dialog: Entity<BranchPromptDialog>,
+    pub local_changes_dialog: Entity<LocalChangesDialog>,
     pub confirm_dialog: Entity<ConfirmDialog>,
     pub stash_save_dialog: Entity<StashSaveDialog>,
     pub worktree_dialog: Entity<WorktreeDialog>,

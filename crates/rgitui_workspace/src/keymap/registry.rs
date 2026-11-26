@@ -599,6 +599,18 @@ pub const CONTEXT_TREE: &[KeyContextNode] = &[
         label: "the rename dialog",
     },
     KeyContextNode {
+        context: "BranchPromptDialog",
+        parent: Some("Workspace"),
+        modal: true,
+        label: "the branch prompt dialog",
+    },
+    KeyContextNode {
+        context: "LocalChangesDialog",
+        parent: Some("Workspace"),
+        modal: true,
+        label: "the local changes dialog",
+    },
+    KeyContextNode {
         context: "ConfirmDialog",
         parent: Some("Workspace"),
         modal: true,

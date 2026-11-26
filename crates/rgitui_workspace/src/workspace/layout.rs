@@ -284,6 +284,8 @@ impl Render for Workspace {
                 .child(self.dialogs.tag_dialog.clone())
                 .child(self.dialogs.worktree_dialog.clone())
                 .child(self.dialogs.rename_dialog.clone())
+                .child(self.dialogs.branch_prompt_dialog.clone())
+                .child(self.dialogs.local_changes_dialog.clone())
                 .child(self.dialogs.stash_save_dialog.clone())
                 .child(self.dialogs.stash_branch_dialog.clone())
                 .child(self.dialogs.create_pr_dialog.clone())
@@ -1607,6 +1609,8 @@ impl Render for Workspace {
             .child(self.dialogs.worktree_dialog.clone())
             // Rename dialog overlay
             .child(self.dialogs.rename_dialog.clone())
+            .child(self.dialogs.branch_prompt_dialog.clone())
+            .child(self.dialogs.local_changes_dialog.clone())
             // Stash dialog overlays
             .child(self.dialogs.stash_save_dialog.clone())
             .child(self.dialogs.stash_branch_dialog.clone())

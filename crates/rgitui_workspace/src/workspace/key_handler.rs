@@ -46,6 +46,8 @@ impl Workspace {
             || self.dialogs.tag_dialog.read(cx).is_visible()
             || self.dialogs.worktree_dialog.read(cx).is_visible()
             || self.dialogs.rename_dialog.read(cx).is_visible()
+            || self.dialogs.branch_prompt_dialog.read(cx).is_visible()
+            || self.dialogs.local_changes_dialog.read(cx).is_visible()
             || self.overlays.repo_opener.read(cx).is_visible()
             || self.dialogs.confirm_dialog.read(cx).is_visible()
             || self.dialogs.stash_branch_dialog.read(cx).is_visible()

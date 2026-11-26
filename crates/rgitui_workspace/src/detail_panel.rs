@@ -703,6 +703,21 @@ impl DetailPanel {
         self.set_history_arc(stash, Arc::new(diff), source, cx);
     }
 
+    /// Show the difference between two revisions. `info` is a stand-in header
+    /// for the comparison; `from` and `to` name the revisions (hex OIDs) the
+    /// diff viewer resolves when applying or reverting hunks.
+    pub fn set_comparison(
+        &mut self,
+        info: CommitInfo,
+        diff: CommitDiff,
+        from: String,
+        to: String,
+        cx: &mut Context<Self>,
+    ) {
+        let source = DiffSource::Compare { from, to };
+        self.set_history_arc(info, Arc::new(diff), source, cx);
+    }
+
     pub(crate) fn set_commit_arc(
         &mut self,
         commit: CommitInfo,

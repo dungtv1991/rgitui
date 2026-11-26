@@ -417,8 +417,10 @@ impl GitProject {
                 .background_executor()
                 .spawn(async move {
                     let repo = Repository::open(&worktree_path)?;
-                    if let Ok(head_tree) = repo.head().and_then(|h| h.peel_to_tree()) {
-                        repo.reset_default(Some(&head_tree.into_object()), &task_paths)?;
+                    // `reset_default` wants a commit-ish; a tree is rejected with
+                    // "can not be successfully peeled into a commit".
+                    if let Ok(head_commit) = repo.head().and_then(|h| h.peel_to_commit()) {
+                        repo.reset_default(Some(head_commit.as_object()), &task_paths)?;
                     } else {
                         let mut index = repo.index()?;
                         for path in &task_paths {

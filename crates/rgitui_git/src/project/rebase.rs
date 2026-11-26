@@ -24,6 +24,18 @@ impl GitProject {
         entries: Vec<RebasePlanEntry>,
         cx: &mut Context<Self>,
     ) -> Task<Result<()>> {
+        self.rebase_interactive_onto(entries, None, cx)
+    }
+
+    /// Like [`Self::rebase_interactive`], but replays the plan on top of `onto`
+    /// (a branch name) instead of the commit the plan starts from. The plan must
+    /// then cover exactly the commits between `onto` and HEAD.
+    pub fn rebase_interactive_onto(
+        &mut self,
+        entries: Vec<RebasePlanEntry>,
+        onto: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<()>> {
         let repo_path = self.repo_path.clone();
         let commit_limit = self.commit_limit;
         let branch_name = self.head_branch.clone();
@@ -81,7 +93,22 @@ impl GitProject {
                             )));
                         }
 
-                        base.to_string()
+                        match &onto {
+                            Some(onto) => {
+                                super::argsafe::validate_branch_name(onto)?;
+                                let onto_oid = repo.revparse_single(onto)?.peel_to_commit()?.id();
+                                let merge_base =
+                                    repo.merge_base(repo.head()?.peel_to_commit()?.id(), onto_oid)?;
+                                if merge_base != base {
+                                    return Err(error(msgp!(
+                                        "git.error.rebase_plan_mismatch",
+                                        entries.len()
+                                    )));
+                                }
+                                onto.clone()
+                            }
+                            None => base.to_string(),
+                        }
                     };
 
                     // Holds the todo list and any reword message files. Dropped

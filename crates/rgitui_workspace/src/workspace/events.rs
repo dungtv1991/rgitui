@@ -13,18 +13,19 @@ use rgitui_git::{
     RebaseEntryAction, RebasePlanEntry, Signature,
 };
 use rgitui_graph::{GraphView, GraphViewEvent, WorktreeGraphInfo};
-use rgitui_i18n::{msg, Message};
+use rgitui_i18n::{msg, t, Message};
 
 use crate::{
     cache::LruCache, BisectView, BisectViewEvent, BlameView, BlameViewEvent, BranchDialog,
-    BranchDialogEvent, CommandPalette, CommandPaletteEvent, CommitPanel, CommitPanelEvent,
-    ConfirmAction, ConfirmDialog, ConfirmDialogEvent, CreatePrDialog, CreatePrDialogEvent,
-    DetailPanel, DetailPanelEvent, FileHistoryView, FileHistoryViewEvent, GlobalSearchView,
-    GlobalSearchViewEvent, InteractiveRebase, InteractiveRebaseEvent, ReflogView, ReflogViewEvent,
-    RenameDialog, RenameDialogEvent, RepoCloneDialog, RepoCloneEvent, RepoOpener, RepoOpenerEvent,
-    ShortcutsHelp, ShortcutsHelpEvent, Sidebar, SidebarEvent, StashBranchDialog,
-    StashBranchDialogEvent, StashSaveDialog, StashSaveDialogEvent, SubmoduleView,
-    SubmoduleViewEvent, TagDialog, TagDialogEvent, ToastKind, Toolbar, ToolbarEvent,
+    BranchDialogEvent, BranchPromptDialog, BranchPromptEvent, CommandPalette, CommandPaletteEvent,
+    CommitPanel, CommitPanelEvent, ConfirmAction, ConfirmDialog, ConfirmDialogEvent,
+    CreatePrDialog, CreatePrDialogEvent, DetailPanel, DetailPanelEvent, FileHistoryView,
+    FileHistoryViewEvent, GlobalSearchView, GlobalSearchViewEvent, InteractiveRebase,
+    InteractiveRebaseEvent, LocalChangesAction, LocalChangesDialog, LocalChangesDialogEvent,
+    ReflogView, ReflogViewEvent, RenameDialog, RenameDialogEvent, RepoCloneDialog, RepoCloneEvent,
+    RepoOpener, RepoOpenerEvent, ShortcutsHelp, ShortcutsHelpEvent, Sidebar, SidebarEvent,
+    StashBranchDialog, StashBranchDialogEvent, StashSaveDialog, StashSaveDialogEvent,
+    SubmoduleView, SubmoduleViewEvent, TagDialog, TagDialogEvent, ToastKind, Toolbar, ToolbarEvent,
     WorktreeDialog, WorktreeDialogEvent,
 };
 
@@ -280,8 +281,9 @@ pub(super) fn subscribe_interactive_rebase(
 ) {
     cx.subscribe(
         interactive_rebase,
-        |this, _ir, event: &InteractiveRebaseEvent, cx| match event {
+        |this, ir, event: &InteractiveRebaseEvent, cx| match event {
             InteractiveRebaseEvent::Execute(entries) => {
+                let onto = ir.read(cx).onto().map(str::to_string);
                 use crate::interactive_rebase::RebaseAction;
 
                 if let Some(tab) = this.tabs.get(this.active_tab) {
@@ -309,7 +311,7 @@ pub(super) fn subscribe_interactive_rebase(
 
                     let project = tab.project.clone();
                     project.update(cx, |proj, cx| {
-                        proj.rebase_interactive(plan, cx).detach();
+                        proj.rebase_interactive_onto(plan, onto, cx).detach();
                     });
 
                     let count = entries.len();
@@ -644,6 +646,65 @@ pub(super) fn subscribe_rename_dialog(
                 );
             }
             RenameDialogEvent::Dismissed => {}
+        },
+    )
+    .detach();
+}
+
+/// The remote branch `branch` tracks, e.g. `origin/main`.
+fn branch_upstream(project: &Entity<GitProject>, branch: &str, cx: &gpui::App) -> Option<String> {
+    project
+        .read(cx)
+        .branches()
+        .iter()
+        .find(|b| !b.is_remote && b.name == branch)
+        .and_then(|b| b.upstream.clone())
+}
+
+pub(super) fn subscribe_branch_prompt_dialog(
+    cx: &mut Context<Workspace>,
+    dialog: &Entity<BranchPromptDialog>,
+) {
+    cx.subscribe(
+        dialog,
+        |this, _d, event: &BranchPromptEvent, cx| match event {
+            BranchPromptEvent::Description { branch, text } => {
+                if let Some(tab) = this.tabs.get(this.active_tab) {
+                    let project = tab.project.clone();
+                    project.update(cx, |proj, cx| {
+                        proj.set_branch_description(branch, text, cx).detach();
+                    });
+                }
+            }
+            BranchPromptEvent::TrackingBranch { branch, upstream } => {
+                if let Some(tab) = this.tabs.get(this.active_tab) {
+                    let project = tab.project.clone();
+                    project.update(cx, |proj, cx| {
+                        proj.set_branch_upstream(branch, Some(upstream), cx)
+                            .detach();
+                    });
+                }
+            }
+            BranchPromptEvent::CompareWith { branch, other } => {
+                this.compare_branch_with(branch.clone(), other.clone(), cx);
+            }
+            BranchPromptEvent::Dismissed => {}
+        },
+    )
+    .detach();
+}
+
+pub(super) fn subscribe_local_changes_dialog(
+    cx: &mut Context<Workspace>,
+    dialog: &Entity<LocalChangesDialog>,
+) {
+    cx.subscribe(
+        dialog,
+        |this, _d, event: &LocalChangesDialogEvent, cx| match event {
+            LocalChangesDialogEvent::Confirmed { action, choice } => {
+                this.run_with_local_changes(action.clone(), *choice, cx);
+            }
+            LocalChangesDialogEvent::Dismissed => {}
         },
     )
     .detach();
@@ -1553,9 +1614,9 @@ pub(super) fn subscribe_sidebar(
                 });
             }
             SidebarEvent::BranchCheckout(name) => {
-                let name = name.clone();
-                project.update(cx, |proj, cx| {
-                    proj.checkout_branch(&name, cx).detach();
+                let action = LocalChangesAction::Checkout(name.clone());
+                this.dialogs.local_changes_dialog.update(cx, |d, cx| {
+                    d.show_visible(action, cx);
                 });
             }
             SidebarEvent::RemoteFetch(name) => {
@@ -1749,6 +1810,103 @@ pub(super) fn subscribe_sidebar(
                 } else {
                     log::warn!("Could not resolve branch '{}' to a commit", name);
                 }
+            }
+            SidebarEvent::BranchCreateFrom(name) => {
+                let name = name.clone();
+                this.dialogs.branch_dialog.update(cx, |bd, cx| {
+                    bd.show_visible(Some(name), cx);
+                });
+            }
+            SidebarEvent::BranchTag(name) => {
+                let resolved = project.read(cx).resolve_branch_to_oid(name);
+                match resolved {
+                    Ok(oid) => {
+                        this.dialogs.tag_dialog.update(cx, |td, cx| {
+                            td.show_visible(oid, cx);
+                        });
+                    }
+                    Err(err) => {
+                        log::warn!("Could not resolve branch '{}' to a commit: {}", name, err);
+                    }
+                }
+            }
+            SidebarEvent::BranchPush(name) => {
+                let name = name.clone();
+                let is_head = project.read(cx).head_branch() == Some(name.as_str());
+                let worktree_path = this.effective_worktree_path(cx);
+                project.update(cx, |proj, cx| {
+                    if is_head {
+                        proj.push_default_at(false, &worktree_path, cx).detach();
+                    } else {
+                        proj.push_branch(&name, cx).detach();
+                    }
+                });
+            }
+            SidebarEvent::BranchFastForward(name) => {
+                let name = name.clone();
+                let upstream = branch_upstream(&project, &name, cx);
+                match upstream {
+                    Some(upstream) => project.update(cx, |proj, cx| {
+                        proj.fast_forward_branch(&name, &upstream, cx).detach();
+                    }),
+                    None => this.show_toast(
+                        t!("branch_menu.no_upstream", branch = name.as_str()).to_string(),
+                        ToastKind::Warning,
+                        cx,
+                    ),
+                }
+            }
+            SidebarEvent::BranchFetchInto(name) => {
+                let name = name.clone();
+                let upstream = branch_upstream(&project, &name, cx);
+                match upstream {
+                    Some(upstream) => project.update(cx, |proj, cx| {
+                        proj.fetch_into_branch(&name, &upstream, cx).detach();
+                    }),
+                    None => this.show_toast(
+                        t!("branch_menu.no_upstream", branch = name.as_str()).to_string(),
+                        ToastKind::Warning,
+                        cx,
+                    ),
+                }
+            }
+            SidebarEvent::BranchRebase(name) => {
+                let action = LocalChangesAction::Rebase(name.clone());
+                this.dialogs.local_changes_dialog.update(cx, |d, cx| {
+                    d.show_visible(action, cx);
+                });
+            }
+            SidebarEvent::BranchInteractiveRebase(name) => {
+                this.start_interactive_rebase_onto(name.clone(), cx);
+            }
+            SidebarEvent::BranchCompareHead(name) => {
+                this.compare_branch_with(name.clone(), "HEAD".to_string(), cx);
+            }
+            SidebarEvent::BranchCompareUpstream(name) => {
+                match branch_upstream(&project, name, cx) {
+                    Some(upstream) => this.compare_branch_with(name.clone(), upstream, cx),
+                    None => this.show_toast(
+                        t!("branch_menu.no_upstream", branch = name.as_str()).to_string(),
+                        ToastKind::Warning,
+                        cx,
+                    ),
+                }
+            }
+            SidebarEvent::BranchCompareWith(name) => {
+                this.compare_with_prompt(name.clone(), cx);
+            }
+            SidebarEvent::BranchEditDescription(name) => {
+                let current = project.read(cx).branch_description(name);
+                let name = name.clone();
+                this.dialogs.branch_prompt_dialog.update(cx, |d, cx| {
+                    d.show_description(name, current, cx);
+                });
+            }
+            SidebarEvent::BranchSetTracking(name) => {
+                this.set_tracking_prompt(name.clone(), cx);
+            }
+            SidebarEvent::BranchArchive(name) => {
+                this.archive_branch_prompt(name.clone(), cx);
             }
             SidebarEvent::BranchCopyName(name) => {
                 let name = name.clone();

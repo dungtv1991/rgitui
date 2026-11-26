@@ -608,6 +608,25 @@ pub fn compute_commit_diff(repo_path: &Path, oid: git2::Oid) -> Result<CommitDif
     result
 }
 
+/// The difference between two revisions, `from` → `to`, as a multi-file diff.
+/// Each side is anything `git rev-parse` accepts that peels to a commit.
+/// Also returns the commits both sides resolved to.
+pub fn compute_range_diff(
+    repo_path: &Path,
+    from: &str,
+    to: &str,
+) -> Result<(CommitDiff, git2::Oid, git2::Oid)> {
+    let repo = Repository::open(repo_path)?;
+    let from_commit = repo.revparse_single(from)?.peel_to_commit()?;
+    let to_commit = repo.revparse_single(to)?.peel_to_commit()?;
+    let diff =
+        repo.diff_tree_to_tree(Some(&from_commit.tree()?), Some(&to_commit.tree()?), None)?;
+    Ok((
+        parse_multi_file_diff(&diff)?,
+        from_commit.id(),
+        to_commit.id(),
+    ))
+}
 pub fn compute_stash_diff(repo_path: &Path, index: usize) -> Result<CommitDiff> {
     let mut repo = Repository::open(repo_path)?;
     let mut stash_oid: Option<git2::Oid> = None;

@@ -1,3 +1,4 @@
+mod branch_menu;
 #[cfg(feature = "perf")]
 mod census;
 mod commands;
@@ -419,6 +420,8 @@ impl Workspace {
         let tag_dialog = cx.new(crate::TagDialog::new);
         let worktree_dialog = cx.new(crate::WorktreeDialog::new);
         let rename_dialog = cx.new(crate::RenameDialog::new);
+        let branch_prompt_dialog = cx.new(crate::BranchPromptDialog::new);
+        let local_changes_dialog = cx.new(crate::LocalChangesDialog::new);
         let confirm_dialog = cx.new(crate::ConfirmDialog::new);
         let stash_save_dialog = cx.new(crate::StashSaveDialog::new);
         let stash_branch_dialog = cx.new(crate::StashBranchDialog::new);
@@ -435,6 +438,8 @@ impl Workspace {
         events::subscribe_tag_dialog(cx, &tag_dialog);
         events::subscribe_worktree_dialog(cx, &worktree_dialog);
         events::subscribe_rename_dialog(cx, &rename_dialog);
+        events::subscribe_branch_prompt_dialog(cx, &branch_prompt_dialog);
+        events::subscribe_local_changes_dialog(cx, &local_changes_dialog);
         events::subscribe_confirm_dialog(cx, &confirm_dialog);
         events::subscribe_stash_save_dialog(cx, &stash_save_dialog);
         events::subscribe_stash_branch_dialog(cx, &stash_branch_dialog);
@@ -475,6 +480,8 @@ impl Workspace {
                 branch_dialog,
                 tag_dialog,
                 rename_dialog,
+                branch_prompt_dialog,
+                local_changes_dialog,
                 confirm_dialog,
                 stash_save_dialog,
                 worktree_dialog,
